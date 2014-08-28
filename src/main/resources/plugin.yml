@@ -1,0 +1,7 @@
+name: MoneyShit
+main: com.mukunda.moneyshit.MoneyShit
+version: ${version}
+depend: 
+  - Vault
+loadbefore:
+  - GoodShop
