@@ -21,7 +21,6 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener; 
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
-import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.Inventory;
@@ -32,7 +31,6 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import com.google.common.base.CaseFormat;
  
 
 
@@ -64,14 +62,13 @@ public class MoneyShit extends JavaPlugin implements Listener {
 		
 		Plugin vault = getServer().getPluginManager().getPlugin("Vault");
 		ServicesManager manager = getServer().getServicesManager();
-		Class<? extends Economy> clazz = Economy_MoneyShit.class;
-		String name = "MoneyShit Economy";
 		try {
-			Economy econ = clazz.getConstructor(MoneyShit.class).newInstance(this);
+			Economy econ = new Economy_MoneyShit(this);
 			manager.register( Economy.class, econ, vault, ServicePriority.High );
-			vault.getLogger().info(String.format("[Economy] %s found: %s", name, econ.isEnabled() ? "Loaded" : "Waiting"));
+			getLogger().info( "Registered with VAULT." );
+			
 		} catch (Exception e) {
-			vault.getLogger().severe(String.format("[Economy] There was an error hooking %s - check to make sure you're using a compatible version!", name));
+			getLogger().severe( "Error registering with VAULT!" );
 		}
 		
 
