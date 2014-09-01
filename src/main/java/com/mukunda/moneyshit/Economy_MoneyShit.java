@@ -1,6 +1,5 @@
 package com.mukunda.moneyshit;
 
-import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -127,7 +126,7 @@ public class Economy_MoneyShit implements Economy {
 	}
 
 	public double getBalance( OfflinePlayer player ) {
-		return context.getBalance( player.getUniqueId() );
+		return context.getAccount( player.getUniqueId() ).balance;
 	}
 
 	@Deprecated
@@ -154,7 +153,7 @@ public class Economy_MoneyShit implements Economy {
 
 	public boolean has(OfflinePlayer player, double amount ) {
 		
-		return context.getBalance( player.getUniqueId() ) >= amount;
+		return context.getAccount( player.getUniqueId() ).balance >= amount;
 	}
 
 	@Deprecated
@@ -227,7 +226,7 @@ public class Economy_MoneyShit implements Economy {
 			
 		} catch( InsufficientFunds e ) {
 			return new EconomyResponse( 
-					0, context.getBalance(player.getUniqueId()), 
+					0, context.getAccount(player.getUniqueId()).balance, 
 					ResponseType.FAILURE, "Insufficient funds." );
 		}
 	}

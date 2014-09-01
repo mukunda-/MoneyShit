@@ -1,13 +1,15 @@
 package com.mukunda.moneyshit;
 
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Properties;
 import java.util.UUID;
 
 import net.milkbowl.vault.economy.Economy;
@@ -30,10 +32,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.java.JavaPlugin;
-
  
-
-
 //-------------------------------------------------------------------------------------------------
 public class MoneyShit extends JavaPlugin implements Listener {
 	
@@ -41,22 +40,22 @@ public class MoneyShit extends JavaPlugin implements Listener {
 	
 	//-------------------------------------------------------------------------------------------------
 	private double startingBalance;
-	private HashMap<UUID,Double> money;
+	private HashMap<UUID,Account> accounts;
 	private HashSet<UUID> dirtyMoney;
 	private boolean saveScheduled = false;
 	
 	
 	//-------------------------------------------------------------------------------------------------
 	public void onEnable() {
-		money = new HashMap<UUID,Double>();
+		accounts = new HashMap<UUID,Account>();
 		dirtyMoney = new HashSet<UUID>();
 		saveConfig();
 		startingBalance = getConfig().getDouble("starting_balance");
 		
 		try {
-			Files.createDirectories( getDataFolder().toPath().resolve( "balances" ) );
+			Files.createDirectories( getDataFolder().toPath().resolve( "users" ) );
 		} catch( IOException e ) {
-			getLogger().warning( "Could not create balances directory. Disabling." );
+			getLogger().warning( "Could not create users directory. Disabling." );
 			getServer().getPluginManager().disablePlugin( this );
 		}
 		
@@ -80,48 +79,53 @@ public class MoneyShit extends JavaPlugin implements Listener {
 	}
 	
 	//-------------------------------------------------------------------------------------------------
-	public double getBalance( UUID player ) {
-		Double balance = money.get(player);
-		if( balance == null ) {
+	public Account getAccount( UUID player ) {
+		Account account = accounts.get(player);
+		if( account == null ) {
+			account = new Account();
 			// try to load
-			Path path = getDataFolder().toPath().resolve( "balances" ).resolve( player.toString() + ".bal" );
+			Path path = getDataFolder().toPath().resolve( "users" ).resolve( player.toString() + ".properties" );
 			
 			if( Files.exists( path ) ) {
 				// load balance
-				try {
-					String content = new String( Files.readAllBytes(path) );
-					balance = Double.parseDouble( content );
-					getLogger().info( "Loaded balance: " + player.toString()+ " : " + balance );
-				} catch (IOException e) {
+				try( FileInputStream fis = new FileInputStream( path.toFile() ) ) {
+					Properties props = new Properties();
+					props.load(fis);
+					if( !account.readProperties( props ) ) {
+						getLogger().severe( "Balance missing from player file. Resetting! " );
+						account.balance = startingBalance;
+					} else {
+						getLogger().info( "Loaded balance: " + player.toString() + " : " + account.balance );
+					} 
+					
+				} catch (IOException e) { 
 					getLogger().severe( "Could not read player balance file. Resetting! "  + e.getMessage() );
-					balance = startingBalance;
-					e.printStackTrace();
-				} catch( NumberFormatException e ) {
-					getLogger().severe( "Could not read player balance file (bad format!). Resetting! " + e.getMessage() );
-					balance = startingBalance;
+					account.balance = startingBalance;
+					e.printStackTrace(); 
 				}
 				
 			} else {
-				balance = startingBalance;
+				// new player
+				account.balance = startingBalance;
 			}
 			
-			money.put( player, balance );
+			accounts.put( player, account );
 		}
 		
-		return balance;
+		return account;
 	}
 	
 	//-------------------------------------------------------------------------------------------------
-	private void saveBalance( UUID player ) {
-		Double balance = money.get(player);
-		if( balance == null ) return; // this should not happen and should assert something..
-		Path path = getDataFolder().toPath().resolve( "balances" ).resolve( player.toString() + ".bal" );
-		ArrayList<String> lines = new ArrayList<String>();
-		lines.add( balance.toString() );
-		try {
-			Files.write( path, lines, StandardCharsets.US_ASCII );
+	private void savePlayerFile( UUID player ) {
+		Account account = accounts.get(player); 
+		if( account == null ) return; // this should not happen and should assert something..
+		Path path = getDataFolder().toPath().resolve( "users" ).resolve( player.toString() + ".properties" );
+		Properties props = account.toProperties();  
+		 
+		try ( FileOutputStream out = new FileOutputStream( path.toFile() ) ){
+			props.store( out, "Account data" );
 		} catch( IOException e ) {
-			getLogger().severe( "Could not save player balance file. " + e.getMessage() );
+			getLogger().severe( "Could not save player data file! " + e.getMessage() );
 			e.printStackTrace();
 		}
 		
@@ -130,7 +134,7 @@ public class MoneyShit extends JavaPlugin implements Listener {
 	//-------------------------------------------------------------------------------------------------
 	private void saveToDisk() {
 		for( UUID id : dirtyMoney ) {
-			saveBalance(id);
+			savePlayerFile(id);
 		}
 		dirtyMoney.clear();
 	}
@@ -154,32 +158,42 @@ public class MoneyShit extends JavaPlugin implements Listener {
 			
 		}
 	}
-	
+	 
 	//-------------------------------------------------------------------------------------------------
 	public void setBalance( UUID player, double amount ) {
-		money.put( player, amount );
+		Account account = getAccount(player);
+		account.balance = amount;
 		setDirty( player ); 
 		
 		giveCurrencyItem( Bukkit.getPlayer(player), amount );
-		
-	}
+	} 
 	
 	//-------------------------------------------------------------------------------------------------
 	public double deposit( UUID player, double amount ) {
-		double balance = getBalance( player );
+		Account account = getAccount(player);
+		double balance = account.balance;
 		if( amount == 0.0 ) return balance;
 		balance += amount;
-		setBalance( player, balance );
+		
+		account.balance = balance;
+		setDirty( player ); 
+		giveCurrencyItem( Bukkit.getPlayer(player), amount );
+		
 		return balance;
 	}
 	
 	//-------------------------------------------------------------------------------------------------
 	public double withdraw( UUID player, double amount ) throws InsufficientFunds {
-		double balance = getBalance( player );
+		Account account = getAccount(player);
+		double balance = account.balance;
 		if( amount > balance ) throw new InsufficientFunds();
 		if( amount == 0.0 ) return balance;
 		balance -= amount;
-		setBalance( player, balance );
+		
+		account.balance = balance;
+		setDirty( player ); 
+		giveCurrencyItem( Bukkit.getPlayer(player), amount );
+		
 		return balance;
 	}
 	
@@ -198,6 +212,7 @@ public class MoneyShit extends JavaPlugin implements Listener {
 		
 	}
 	
+	//-------------------------------------------------------------------------------------------------
 	private int findCurrencyItem( Inventory inv ) {
 		for( int i = 0; i < inv.getSize(); i++ ) {
 			if( isCurrencyItem( inv.getItem(i) ) ) {
@@ -328,7 +343,7 @@ public class MoneyShit extends JavaPlugin implements Listener {
 	
 	@EventHandler
 	public void onPlayerJoin( PlayerJoinEvent event ) {
-		giveCurrencyItem( event.getPlayer(), getBalance( event.getPlayer().getUniqueId() ) );
+		giveCurrencyItem( event.getPlayer(), getAccount( event.getPlayer().getUniqueId() ).balance );
 	}
 	
 	public String formatCurrency( Double amount, boolean integer ) {
