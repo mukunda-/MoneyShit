@@ -1,3 +1,27 @@
+/*
+ * MoneyShit Economy System
+ *
+ * Copyright (c) 2014 Mukunda Johnson
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 package com.mukunda.moneyshit;
 
 import java.io.FileInputStream;
@@ -33,6 +57,12 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.java.JavaPlugin;
  
+/**
+ * MoneyShit Bukkit Plugin
+ * 
+ * @author mukunda
+ *
+ */
 //-------------------------------------------------------------------------------------------------
 public class MoneyShit extends JavaPlugin implements Listener {
 	
@@ -78,13 +108,21 @@ public class MoneyShit extends JavaPlugin implements Listener {
 		saveToDisk();
 	}
 	
-	//-------------------------------------------------------------------------------------------------
-	public Account getAccount( UUID player ) {
-		Account account = accounts.get(player);
+	/************************************************************************************
+	 * Get an account associated with a UUID, and create one if it doesn't exist.
+	 * 
+	 * An account holds the balance plus other stored fields for an entity. It does not
+	 * have to be a player UUID.
+	 * 
+	 * @param player  UUID of account to lookup
+	 * @return        Account associated with UUID. null if a serious error occurs.
+	 ************************************************************************************/
+	public Account getAccount( UUID uuid ) {
+		Account account = accounts.get( uuid );
 		if( account == null ) {
 			account = new Account();
 			// try to load
-			Path path = getDataFolder().toPath().resolve( "users" ).resolve( player.toString() + ".properties" );
+			Path path = getDataFolder().toPath().resolve( "users" ).resolve( uuid.toString() + ".properties" );
 			
 			if( Files.exists( path ) ) {
 				// load balance
@@ -95,7 +133,7 @@ public class MoneyShit extends JavaPlugin implements Listener {
 						getLogger().severe( "Balance missing from player file. Resetting! " );
 						account.balance = startingBalance;
 					} else {
-						getLogger().info( "Loaded balance: " + player.toString() + " : " + account.balance );
+						getLogger().info( "Loaded balance: " + uuid.toString() + " : " + account.balance );
 					} 
 					
 				} catch (IOException e) { 
@@ -109,17 +147,22 @@ public class MoneyShit extends JavaPlugin implements Listener {
 				account.balance = startingBalance;
 			}
 			
-			accounts.put( player, account );
+			accounts.put( uuid, account );
 		}
 		
 		return account;
 	}
 	
-	//-------------------------------------------------------------------------------------------------
-	private void savePlayerFile( UUID player ) {
-		Account account = accounts.get(player); 
+	/**************************************************************************
+	 * Save account to disk.
+	 * 
+	 * @param uuid UUID of account to save.
+	 **************************************************************************/
+	private void saveAccountFile( UUID uuid ) {
+		Account account = accounts.get( uuid ); 
 		if( account == null ) return; // this should not happen and should assert something..
-		Path path = getDataFolder().toPath().resolve( "users" ).resolve( player.toString() + ".properties" );
+		
+		Path path = getDataFolder().toPath().resolve( "users" ).resolve( uuid.toString() + ".properties" );
 		Properties props = account.toProperties();  
 		 
 		try ( FileOutputStream out = new FileOutputStream( path.toFile() ) ){
@@ -131,17 +174,24 @@ public class MoneyShit extends JavaPlugin implements Listener {
 		
 	}
 	
-	//-------------------------------------------------------------------------------------------------
+	/**************************************************************************
+	 * Save any dirty (changed) accounts to disk, and reset the dirty list. 
+	 **************************************************************************/
 	private void saveToDisk() {
 		for( UUID id : dirtyMoney ) {
-			savePlayerFile(id);
+			saveAccountFile(id);
 		}
 		dirtyMoney.clear();
 	}
 	
-	//-------------------------------------------------------------------------------------------------
-	private void setDirty( UUID player ) {
-		dirtyMoney.add(player);
+	/**************************************************************************
+	 * Mark an account as "dirty" (changed), and schedule a save if one is
+	 * not scheduled already.
+	 * 
+	 * @param uuid UUID of account to flag.
+	 **************************************************************************/
+	private void setDirty( UUID uuid ) {
+		dirtyMoney.add( uuid );
 		if( !saveScheduled ) {
 			saveScheduled = true;
 			
@@ -159,60 +209,129 @@ public class MoneyShit extends JavaPlugin implements Listener {
 		}
 	}
 	 
-	//-------------------------------------------------------------------------------------------------
-	public void setBalance( UUID player, double amount ) {
-		Account account = getAccount(player);
+	/**************************************************************************
+	 * Set the balance of an account.
+	 * 
+	 * @param uuid   UUID of account to modify.
+	 * @param amount New balance to set in the account.
+	 **************************************************************************/
+	public void setBalance( UUID uuid, double amount ) {
+		Account account = getAccount( uuid );
 		account.balance = amount;
-		setDirty( player ); 
+		setDirty( uuid ); 
 		
-		giveCurrencyItem( Bukkit.getPlayer(player), amount );
+		giveCurrencyItem( Bukkit.getPlayer(uuid), amount );
 	} 
 	
-	//-------------------------------------------------------------------------------------------------
-	public double deposit( UUID player, double amount ) {
-		Account account = getAccount(player);
+	/**************************************************************************
+	 * Add to an account's balance
+	 * 
+	 * @param uuid    UUID of account to modify.
+	 * @param amount  Amount to add to the account's balance.
+	 * @return        The new balance of the account.
+	 **************************************************************************/
+	public double deposit( UUID uuid, double amount ) {
+		Account account = getAccount( uuid );
 		double balance = account.balance;
 		if( amount == 0.0 ) return balance;
 		balance += amount;
 		
 		account.balance = balance;
-		setDirty( player ); 
-		giveCurrencyItem( Bukkit.getPlayer(player), amount );
+		setDirty( uuid ); 
+		giveCurrencyItem( Bukkit.getPlayer( uuid ), amount );
 		
 		return balance;
 	}
 	
-	//-------------------------------------------------------------------------------------------------
-	public double withdraw( UUID player, double amount ) throws InsufficientFunds {
-		Account account = getAccount(player);
+	/**************************************************************************
+	 * Subtract from an account's balance.
+	 * @param uuid    UUID of account to modify.
+	 * @param amount  Amount to subtract from the account's balance.
+	 * @return        The new balance of the account.
+	 * @throws InsufficientFunds If the account's balance is less than amount.
+	 **************************************************************************/
+	public double withdraw( UUID uuid, double amount ) throws InsufficientFunds {
+		Account account = getAccount( uuid );
 		double balance = account.balance;
 		if( amount > balance ) throw new InsufficientFunds();
 		if( amount == 0.0 ) return balance;
 		balance -= amount;
 		
 		account.balance = balance;
-		setDirty( player ); 
-		giveCurrencyItem( Bukkit.getPlayer(player), amount );
+		setDirty( uuid ); 
+		giveCurrencyItem( Bukkit.getPlayer(uuid), amount );
 		
 		return balance;
 	}
 	
-	//-------------------------------------------------------------------------------------------------
+	/**************************************************************************
+	 * Read a data field from an account
+	 * 
+	 * Data fields are general purpose storage associated with a UUID.
+	 * 
+	 * @param uuid      UUID of account to modify.
+	 * @param fieldName Name of field to read.
+	 * @return          Value of field, or null if it doesn't exist yet.
+	 **************************************************************************/
+	public String readField( UUID uuid, String fieldName ) {
+		Account account = getAccount( uuid );
+		String data = account.fields.get( fieldName );
+		return data;
+	}
+	
+	/**************************************************************************
+	 * Set a data field for an account
+	 * 
+	 * Data fields are general purpose storage associated with a UUID.
+	 * 
+	 * @param uuid       UUID of account to modify
+	 * @param fieldName  Name of field to write
+	 * @param fieldValue Value of field to set, null to remove the field.
+	 * @return           The previous value of the field, or null if it was
+	 *                   not set.
+	 **************************************************************************/
+	public String setField( UUID uuid, String fieldName, String fieldValue ) {
+		Account account = getAccount( uuid );
+		String oldValue;
+		if( fieldValue == null ) {
+			oldValue = account.fields.remove( fieldName );
+		} else {
+			oldValue = account.fields.put( fieldName, fieldValue );
+		}
+		
+		setDirty( uuid ); 
+		return oldValue;
+	}
+	
+	/**************************************************************************
+	 * Create an ItemStack that shows an account's balance. This item is 
+	 * a Gold Nugget with the balance shown the title, and a short description.
+	 * 
+	 * @param balance Balance to display in the item
+	 * @return        "Currency Item"
+	 **************************************************************************/
 	private ItemStack createCurrencyItem( double balance ) {
 		ItemStack item = new ItemStack( Material.GOLD_NUGGET );
 		ItemMeta meta = item.getItemMeta();
-		meta.setDisplayName( ""+ChatColor.GOLD + ChatColor.BOLD +  formatCurrency(balance,true) );//""+ChatColor.GOLD+ ChatColor.ITALIC +"Gold" );
+		
+		meta.setDisplayName( 
+				""+ChatColor.GOLD + ChatColor.BOLD + formatCurrency(balance,true) );
 		ArrayList<String> lore = new ArrayList<String>();
-		lore.add( COIN_META ); 
-		lore.add( ChatColor.GRAY + "Currency" ); 
-		  
+		lore.add( COIN_META ); // special marker that identifies a Currency item 
+		lore.add( ChatColor.GRAY + "Currency" ); // short description
+		
 		meta.setLore( lore );
 		item.setItemMeta( meta );
 		return item;
-		
 	}
 	
-	//-------------------------------------------------------------------------------------------------
+	/**************************************************************************
+	 * Search an inventory for a currency item.
+	 * 
+	 * @param inv Inventory to search.
+	 * @return    Slot index that contains a currency item, 
+	 *            or -1 if none found.
+	 **************************************************************************/
 	private int findCurrencyItem( Inventory inv ) {
 		for( int i = 0; i < inv.getSize(); i++ ) {
 			if( isCurrencyItem( inv.getItem(i) ) ) {
@@ -222,20 +341,46 @@ public class MoneyShit extends JavaPlugin implements Listener {
 		return -1;
 	}
 	
-	//-------------------------------------------------------------------------------------------------
+	private boolean itemExists( ItemStack item ) {
+		if( item == null ) return false;
+		if( item.getType() == Material.AIR ) {
+			return false;
+		}
+		return true;
+	}
+	
+	/**************************************************************************
+	 * Give a player a currency item. This replaces an existing one if found.
+	 * 
+	 * @param player Player to give to, this can be null and this function will
+	 *               then do nothing.
+	 * @param balance Balance to reflect in the new currency item.
+	 **************************************************************************/
 	private void giveCurrencyItem( Player player, double balance ) {
 		if( player == null ) return;
 		Inventory inv = player.getInventory();
 		if( inv == null ) return;
 		int slot = findCurrencyItem( inv );
 		if( slot < 0 ) {
+			// prefer a few hotbar slots
+			for( int i = 8; i >= 5; i-- ) {
+				if( !itemExists( inv.getItem( i ) ) ) {
+					inv.setItem( i, createCurrencyItem( balance ) );
+					return;
+				}
+			}
 			inv.addItem( createCurrencyItem( balance ) );
 		} else {
 			inv.setItem( slot, createCurrencyItem( balance ) );
 		}
 	}
 	
-	//-------------------------------------------------------------------------------------------------
+	/**************************************************************************
+	 * Checks if the item given is a "currency item".
+	 * 
+	 * @param item ItemStack to check.
+	 * @return     true if the item is a MoneyShit currency item.
+	 **************************************************************************/
 	private boolean isCurrencyItem( ItemStack item ) {
 		if( item == null ) return false;
 		if( item.getType() != Material.GOLD_NUGGET ) return false;
@@ -246,25 +391,15 @@ public class MoneyShit extends JavaPlugin implements Listener {
 	//-------------------------------------------------------------------------------------------------
 	@EventHandler( priority = EventPriority.LOW, ignoreCancelled = true)
 	public void onInventoryClick( InventoryClickEvent event ) {
-		 
-		Inventory inv = event.getInventory();
-		Bukkit.broadcastMessage( "---4" );
-		Bukkit.broadcastMessage( ChatColor.AQUA + inv.getHolder().getClass().toString() );
-		Bukkit.broadcastMessage( ChatColor.WHITE + event.getAction().toString() );
-		Bukkit.broadcastMessage( ChatColor.GREEN + event.getClick().toString() );
-		Bukkit.broadcastMessage( 
-				""+ChatColor.BLUE + event.getHotbarButton() + "," + 
-					event.getRawSlot() + "," + event.getSlot() + "," + 
-					event.getSlotType().toString() + "," + 
-					event.getInventory().getType() + "," + 
-					event.getInventory().getSize() );
+
+		// prevent a user from moving the coin item from their inventory
+		// to somewhere else
 		
 		boolean isCursor = isCurrencyItem(event.getCursor());
 		boolean isCurrent = isCurrencyItem(event.getCurrentItem()); 
 		
 		if( !isCursor && !isCurrent ) return;
 		
-		//Bukkit.broadcastMessage( ""+ChatColor.GREEN + event.getClick().toString() );
 		switch( event.getAction() ) {
 			case CLONE_STACK:
 			case DROP_ALL_SLOT:
@@ -307,45 +442,55 @@ public class MoneyShit extends JavaPlugin implements Listener {
 			default:
 				event.setCancelled(true);
 		}
-		/* old and simple :(
-		if( event.getSlot() == 8 && event.getSlotType() == SlotType.QUICKBAR ) {
-			event.getCurrentItem();
-			if( isCurrencyItem( event.getCurrentItem() ) ) {
-				event.setCancelled(true);
-			}
-				
-		}*/
-		
 		
 	}
 	//-------------------------------------------------------------------------------------------------
 	@EventHandler( priority = EventPriority.LOW, ignoreCancelled = true)
 	public void onInventoryDrag( InventoryDragEvent event ) {
+		
+		// prevent a user from moving the coin item from their inventory
+		// to somewhere else
 		if( isCurrencyItem( event.getOldCursor() ) ) {
 			int size = event.getInventory().getSize();
 			for( int slot : event.getRawSlots() ) {
 				if( slot < size ) {
-					// they put the coin somewhere it doesnt belong.
+					// they put the coin somewhere it doesn't belong.
 					event.setCancelled(true);
 					return;
 				}
 			}
 		}
 	}
+	
 	//-------------------------------------------------------------------------------------------------
 	@EventHandler( priority = EventPriority.LOW, ignoreCancelled = true)
 	public void onDrop( PlayerDropItemEvent event ) {
 		 
+		// stop them from dropping their cool currency item.
 		if( isCurrencyItem(event.getItemDrop().getItemStack()) ) {
 			event.setCancelled(true);
 		}
+		
+		// they can still drop it if they have no inventory space :(, but it gets destroyed
+		// they will get it back the next time they login or do a transaction
 	}
 	
+	//-------------------------------------------------------------------------------------------------
 	@EventHandler
 	public void onPlayerJoin( PlayerJoinEvent event ) {
+		
+		// give player's their currency item.
 		giveCurrencyItem( event.getPlayer(), getAccount( event.getPlayer().getUniqueId() ).balance );
 	}
 	
+	/**************************************************************************
+	 * Format a currency string.
+	 *   
+	 * @param amount Amount to display.
+	 * @param integer Discard fractional part.
+	 * @return Formatted currency string, looks like "1,234,456 G" or
+	 * "1,234.5 G" (when integer==false)
+	 **************************************************************************/
 	public String formatCurrency( Double amount, boolean integer ) {
 		DecimalFormat df;
 		if( integer ) {
